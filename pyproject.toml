@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-async-runner"
+version = "0.1.0"
+description = "Async subprocess execution engine with Human-in-the-Loop (HITL) approval guardrails and execution timeouts for AI agents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "agent-core-utils>=0.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+agent-core-utils = { git = "https://github.com/CodeCentury22/agent-core-utils.git", rev = "v0.1.0" }
