@@ -9,7 +9,7 @@ description = "Async subprocess execution engine with Human-in-the-Loop (HITL) a
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "agent-core-utils>=0.1.0",
+    "agent-core-utils",
 ]
 
 [dependency-groups]
@@ -19,4 +19,4 @@ dev = [
 ]
 
 [tool.uv.sources]
-agent-core-utils = { git = "https://github.com/CodeCentury22/agent-core-utils.git", rev = "v0.1.0" }
+agent-core-utils = { git = "https://github.com/CodeCentury22/agent-core-utils.git", tag = "v0.2.0" }
