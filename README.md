@@ -14,4 +14,4 @@ Async subprocess execution engine with Human-in-the-Loop (HITL) approval guardra
 Add `agent-async-runner` to your project using `uv`:
 
 ```bash
-uv add git+[https://github.com/CodeCentury22/agent-async-runner.git@v0.2.0](https://github.com/CodeCentury22/agent-async-runner.git@v0.2.0)
+uv add git+[https://github.com/CodeCentury22/agent-async-runner.git@v0.2.1](https://github.com/CodeCentury22/agent-async-runner.git@v0.2.1)
