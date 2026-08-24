@@ -1,7 +1,7 @@
 import asyncio
 import os
 import shlex
-from typing import Dict, Any
+from typing import Dict, Any, List
 from agent_core_utils import track_latency, audit_logger
 
 HIGHRISKCOMMANDS = {"rm", "rmdir", "chmod", "chown", "sudo", "dd", "mkfs"}
@@ -25,10 +25,10 @@ def request_human_approval(command: str) -> bool:
     return response == "y"
 
 @track_latency
-@audit_logger(log_file="async_telemtry.jsonl")
+@audit_logger(log_file="async_telemetry.jsonl")
 async def execute_async_subprocess(
     command: str,
-    timeout: float = 5.0,
+    timeout: float = 30.0,
     bypass_hitl: bool = False
 ) -> Dict[str, Any]:
     """
@@ -37,14 +37,16 @@ async def execute_async_subprocess(
     # 1. Human-in-the-Loop Guardrail
     if is_high_risk(command) and not bypass_hitl:
         approved = request_human_approval(command)
-        print("🚫 [HITL DENIED]: Command execution aborted by operator.")
-        return {
-            "command": command,
-            "stdout": "",
-            "stderr": "Execution denied by human operator",
-            "returncode": -1,
-            "status": "DENIED"
-        }
+        if not approved:
+            print("🚫 [HITL DENIED]: Command execution aborted by operator.")
+            return {
+                "command": command,
+                "stdout": "",
+                "stderr": "Execution denied by human operator",
+                "returncode": -1,
+                "status": "DENIED"
+            }
+
     # 2. Async subprocess Execution
     print(f"⚡ [Executing Subprocess]: {command}")
     try:
@@ -83,3 +85,36 @@ async def execute_async_subprocess(
             "returncode": -9,
             "status": "TIMEOUT"
         }
+
+# Alias for tool execution parity across the ecosystem
+run_shell_command = execute_async_subprocess
+
+# Tool Schema Declaration for LLM Function Calling
+SHELL_TOOLS_SCHEMA: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell_command",
+            "description": "Executes a bash shell command asynchronously with HITL safety checks and timeout bounds.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The exact shell command string to execute (e.g., 'git status', 'pytest', 'uv sync')."
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Maximum execution time in seconds.",
+                        "default": 30.0
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    }
+]
+
+ASYNC_TOOL_DISPATCHER = {
+    "run_shell_command": run_shell_command
+}
