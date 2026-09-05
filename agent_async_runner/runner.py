@@ -8,8 +8,11 @@ from agent_core_utils import track_latency, audit_logger
 HIGHRISKCOMMANDS = {"rm", "rmdir", "chmod", "chown", "sudo", "dd", "mkfs"}
 
 # 1. Long-running interactive daemons & dev servers across all major tech stacks
-# Extended long-running interactive daemons & dev servers
 BLOCKED_DAEMONS = [
+    # MCP (Model Context Protocol) Daemons
+    r"\b(npx\s+)?ng\s+mcp(?!\s+--help)\b",
+    r"\b(uvx\s+|npx\s+)?mcp-server-.*\b",
+    
     # Android / Gradle / Kotlin
     r"\b(gradlew?|./gradlew)\s+.*(run|app:run|connectedCheck)\b",
     r"\b(adb)\s+(logcat|shell|wait-for-device)\b",
@@ -23,11 +26,16 @@ BLOCKED_DAEMONS = [
     r"\b(npx\s+)?react-native\s+(start|run-android|run-ios)\b",
     r"\bflutter\s+(run|attach)\b",
     
-    # Web & Server Frameworks...
+    # Web & Server Frameworks (Angular, Vite, Webpack, etc.)
+    r"\b(ng|npx\s+ng)\s+(serve|s)\b",
+    r"\b(vite|npx\s+vite)\b",
 ]
 
 # Extended non-blocking test runner rules
 TEST_SANITY_RULES = [
+    # Angular / Jasmine / Karma tests
+    (r"\b(ng|npx\s+ng)\s+test\b", "--watch=false"),
+
     # Android / Gradle tests
     (r"\b(gradlew?|./gradlew)\s+test\b", "--info"),
     
@@ -37,7 +45,7 @@ TEST_SANITY_RULES = [
     # Flutter tests
     (r"\bflutter\s+test\b", "--no-pub"),
     
-    # React Native / Jest tests
+    # React Native / Jest / Generic npm tests
     (r"\b(npm|yarn|pnpm|bun)\s+test\b", "-- --watchAll=false --watch=false"),
 ]
 
@@ -49,11 +57,18 @@ def intercept_and_sanitize_command(command: str) -> Tuple[bool, str, str]:
     """
     cmd_str = command.strip()
 
-    # Step 1: Check for long-running daemons
+    # Step 1: Check for long-running daemons or MCP background servers
     for pattern in BLOCKED_DAEMONS:
         if re.search(pattern, cmd_str, re.IGNORECASE):
             match = re.search(pattern, cmd_str, re.IGNORECASE)
             matched_text = match.group(0) if match else cmd_str
+            
+            if "mcp" in matched_text.lower():
+                return True, cmd_str, (
+                    f"Command '{matched_text}' launches a persistent Model Context Protocol (MCP) stdio server. "
+                    f"MCP servers cannot be executed as one-shot shell tools. Fall back to standard file tools, search, or CLI commands."
+                )
+            
             return True, cmd_str, (
                 f"Command '{matched_text}' launches an interactive daemon or long-running dev server. "
                 f"Interactive processes are forbidden during agent execution turns. Use single-run bounded commands."

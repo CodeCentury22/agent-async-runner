@@ -14,12 +14,26 @@ def test_is_high_risk_detection():
 
 
 def test_intercept_and_sanitize_command_daemons():
-    # Angular / Web Daemons
+    # MCP Daemons (Specific MCP error message)
     blocked, _, err = intercept_and_sanitize_command("ng mcp")
+    assert blocked is True
+    assert "Model Context Protocol (MCP)" in err
+
+    blocked, _, err = intercept_and_sanitize_command("npx mcp-server-git")
+    assert blocked is True
+    assert "Model Context Protocol (MCP)" in err
+
+    # MCP Help Inspection Pass-through
+    blocked, sanitized, _ = intercept_and_sanitize_command("npx ng mcp --help")
+    assert blocked is False
+    assert sanitized == "npx ng mcp --help"
+
+    # Web & Server Daemons
+    blocked, _, err = intercept_and_sanitize_command("ng serve")
     assert blocked is True
     assert "interactive daemon" in err
 
-    blocked, _, _ = intercept_and_sanitize_command("npm run dev")
+    blocked, _, _ = intercept_and_sanitize_command("vite")
     assert blocked is True
 
     # Mobile Daemons (Android / iOS / Expo / Flutter)
@@ -56,6 +70,14 @@ async def test_execute_async_subprocess_blocked():
     assert result["status"] == "BLOCKED"
     assert result["returncode"] == 1
     assert "System Guardrail Error" in result["stderr"]
+
+
+@pytest.mark.asyncio
+async def test_execute_async_subprocess_mcp_blocked():
+    result = await execute_async_subprocess("ng mcp")
+    assert result["status"] == "BLOCKED"
+    assert result["returncode"] == 1
+    assert "Model Context Protocol (MCP)" in result["stderr"]
 
 
 @pytest.mark.asyncio
