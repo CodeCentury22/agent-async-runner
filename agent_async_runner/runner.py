@@ -7,11 +7,10 @@ from agent_core_utils import track_latency, audit_logger
 
 HIGHRISKCOMMANDS = {"rm", "rmdir", "chmod", "chown", "sudo", "dd", "mkfs"}
 
-# 1. Long-running interactive daemons & dev servers across all major tech stacks
+# 1. Long-running interactive daemons & blocked protocols across all major tech stacks
 BLOCKED_DAEMONS = [
-    # MCP (Model Context Protocol) Daemons
-    r"\b(npx\s+)?ng\s+mcp(?!\s+--help)\b",
-    r"\b(uvx\s+|npx\s+)?mcp-server-.*\b",
+    # Blanket block on all Model Context Protocol (MCP) commands & tools
+    r"\b(npx\s+|uvx\s+|python\s+-m\s+)?.*mcp.*\b",
     
     # Android / Gradle / Kotlin
     r"\b(gradlew?|./gradlew)\s+.*(run|app:run|connectedCheck)\b",
@@ -65,8 +64,9 @@ def intercept_and_sanitize_command(command: str) -> Tuple[bool, str, str]:
             
             if "mcp" in matched_text.lower():
                 return True, cmd_str, (
-                    f"Command '{matched_text}' launches a persistent Model Context Protocol (MCP) stdio server. "
-                    f"MCP servers cannot be executed as one-shot shell tools. Fall back to standard file tools, search, or CLI commands."
+                    f"Model Context Protocol (MCP) commands ('{matched_text}') are strictly disabled in this environment. "
+                    f"Do NOT attempt to use MCP tools or commands. You MUST fulfill the user request using standard file tools, "
+                    f"grep/find, or standard single-run CLI commands."
                 )
             
             return True, cmd_str, (

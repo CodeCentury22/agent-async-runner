@@ -14,19 +14,18 @@ def test_is_high_risk_detection():
 
 
 def test_intercept_and_sanitize_command_daemons():
-    # MCP Daemons (Specific MCP error message)
+    # Blanket MCP Blocking Assertions
     blocked, _, err = intercept_and_sanitize_command("ng mcp")
     assert blocked is True
-    assert "Model Context Protocol (MCP)" in err
+    assert "strictly disabled" in err
 
     blocked, _, err = intercept_and_sanitize_command("npx mcp-server-git")
     assert blocked is True
-    assert "Model Context Protocol (MCP)" in err
+    assert "strictly disabled" in err
 
-    # MCP Help Inspection Pass-through
-    blocked, sanitized, _ = intercept_and_sanitize_command("npx ng mcp --help")
-    assert blocked is False
-    assert sanitized == "npx ng mcp --help"
+    blocked, _, err = intercept_and_sanitize_command("npx ng mcp --help")
+    assert blocked is True
+    assert "strictly disabled" in err
 
     # Web & Server Daemons
     blocked, _, err = intercept_and_sanitize_command("ng serve")
@@ -77,7 +76,7 @@ async def test_execute_async_subprocess_mcp_blocked():
     result = await execute_async_subprocess("ng mcp")
     assert result["status"] == "BLOCKED"
     assert result["returncode"] == 1
-    assert "Model Context Protocol (MCP)" in result["stderr"]
+    assert "strictly disabled" in result["stderr"]
 
 
 @pytest.mark.asyncio
