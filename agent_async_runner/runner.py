@@ -1,10 +1,71 @@
 import asyncio
 import os
+import re
 import shlex
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from agent_core_utils import track_latency, audit_logger
 
 HIGHRISKCOMMANDS = {"rm", "rmdir", "chmod", "chown", "sudo", "dd", "mkfs"}
+
+# 1. Long-running interactive daemons & dev servers across all major tech stacks
+# Extended long-running interactive daemons & dev servers
+BLOCKED_DAEMONS = [
+    # Android / Gradle / Kotlin
+    r"\b(gradlew?|./gradlew)\s+.*(run|app:run|connectedCheck)\b",
+    r"\b(adb)\s+(logcat|shell|wait-for-device)\b",
+    
+    # iOS / Xcode
+    r"\bxcodebuild\s+.*test-without-building\b",
+    r"\bxcrun\s+simctl\s+launch\b",
+    
+    # Cross-Platform (React Native / Expo / Flutter)
+    r"\b(npx\s+)?expo\s+(start|run:android|run:ios)\b",
+    r"\b(npx\s+)?react-native\s+(start|run-android|run-ios)\b",
+    r"\bflutter\s+(run|attach)\b",
+    
+    # Web & Server Frameworks...
+]
+
+# Extended non-blocking test runner rules
+TEST_SANITY_RULES = [
+    # Android / Gradle tests
+    (r"\b(gradlew?|./gradlew)\s+test\b", "--info"),
+    
+    # iOS / Xcode tests
+    (r"\bxcodebuild\s+test\b", "-disable-concurrent-destination-testing"),
+    
+    # Flutter tests
+    (r"\bflutter\s+test\b", "--no-pub"),
+    
+    # React Native / Jest tests
+    (r"\b(npm|yarn|pnpm|bun)\s+test\b", "-- --watchAll=false --watch=false"),
+]
+
+
+def intercept_and_sanitize_command(command: str) -> Tuple[bool, str, str]:
+    """
+    Validates and transforms commands across all software frameworks before execution.
+    Returns: (is_blocked, transformed_command, error_reason)
+    """
+    cmd_str = command.strip()
+
+    # Step 1: Check for long-running daemons
+    for pattern in BLOCKED_DAEMONS:
+        if re.search(pattern, cmd_str, re.IGNORECASE):
+            match = re.search(pattern, cmd_str, re.IGNORECASE)
+            matched_text = match.group(0) if match else cmd_str
+            return True, cmd_str, (
+                f"Command '{matched_text}' launches an interactive daemon or long-running dev server. "
+                f"Interactive processes are forbidden during agent execution turns. Use single-run bounded commands."
+            )
+
+    # Step 2: Auto-inject non-blocking flags into test commands
+    for pattern, required_flag in TEST_SANITY_RULES:
+        if re.search(pattern, cmd_str) and required_flag.split()[0] not in cmd_str:
+            cmd_str = f"{cmd_str} {required_flag}"
+
+    return False, cmd_str, ""
+
 
 def is_high_risk(command: str) -> bool:
     """Checks whether a command string targets high-risk system binaries."""
@@ -17,12 +78,14 @@ def is_high_risk(command: str) -> bool:
     except ValueError:
         return True
 
+
 def request_human_approval(command: str) -> bool:
     """Prompts human operator in terminal for approval on high-risk operations."""
     print(f"\n⚠️  [HITL GUARDRAIL INTERCEPT]: High-risk command detected!")
     print(f"👉 Command: '{command}'")
     response = input("Do you authorize execution? (y/N): ").strip().lower()
     return response == "y"
+
 
 @track_latency
 @audit_logger(log_file="async_telemetry.jsonl")
@@ -32,26 +95,38 @@ async def execute_async_subprocess(
     bypass_hitl: bool = False
 ) -> Dict[str, Any]:
     """
-    Executes a shell command asynchronously with HITL safety checks and timeout guardrails.
+    Executes a shell command asynchronously with HITL safety checks, command interception, and timeout guardrails.
     """
-    # 1. Human-in-the-Loop Guardrail
-    if is_high_risk(command) and not bypass_hitl:
-        approved = request_human_approval(command)
+    # 1. Multi-Platform Interception & Sanitization
+    is_blocked, sanitized_cmd, block_reason = intercept_and_sanitize_command(command)
+    if is_blocked:
+        print(f"🚫 [GUARDRAIL BLOCKED]: {block_reason}")
+        return {
+            "command": command,
+            "stdout": "",
+            "stderr": f"System Guardrail Error: {block_reason}",
+            "returncode": 1,
+            "status": "BLOCKED"
+        }
+
+    # 2. Human-in-the-Loop Guardrail
+    if is_high_risk(sanitized_cmd) and not bypass_hitl:
+        approved = request_human_approval(sanitized_cmd)
         if not approved:
             print("🚫 [HITL DENIED]: Command execution aborted by operator.")
             return {
-                "command": command,
+                "command": sanitized_cmd,
                 "stdout": "",
                 "stderr": "Execution denied by human operator",
                 "returncode": -1,
                 "status": "DENIED"
             }
 
-    # 2. Async subprocess Execution
-    print(f"⚡ [Executing Subprocess]: {command}")
+    # 3. Async Subprocess Execution
+    print(f"⚡ [Executing Subprocess]: {sanitized_cmd}")
     try:
         process = await asyncio.create_subprocess_shell(
-            command,
+            sanitized_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -64,7 +139,7 @@ async def execute_async_subprocess(
         stderr = stderr_bytes.decode("utf-8").strip()
 
         return {
-            "command": command,
+            "command": sanitized_cmd,
             "stdout": stdout,
             "stderr": stderr,
             "returncode": process.returncode,
@@ -79,12 +154,13 @@ async def execute_async_subprocess(
             pass
 
         return {
-            "command": command,
+            "command": sanitized_cmd,
             "stdout": "",
             "stderr": f"Command timed out after {timeout} seconds.",
             "returncode": -9,
             "status": "TIMEOUT"
         }
+
 
 # Alias for tool execution parity across the ecosystem
 run_shell_command = execute_async_subprocess
