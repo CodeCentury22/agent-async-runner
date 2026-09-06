@@ -6,6 +6,7 @@ from .runner import (
     SHELL_TOOLS_SCHEMA,
     ASYNC_TOOL_DISPATCHER,
 )
+from .git_utils import get_git_status_changes
 
 __all__ = [
     "execute_async_subprocess",
@@ -14,4 +15,5 @@ __all__ = [
     "request_human_approval",
     "SHELL_TOOLS_SCHEMA",
     "ASYNC_TOOL_DISPATCHER",
+    "get_git_status_changes",
 ]
