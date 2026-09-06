@@ -17,7 +17,7 @@ def test_is_high_risk_detection():
     assert is_high_risk("ls -la") is False
 
 
-def test_intercept_and_sanitize_command_daemons_and_schematics():
+def test_intercept_and_sanitize_command_daemons():
     # Blanket MCP Blocking Assertions
     blocked, _, err = intercept_and_sanitize_command("ng mcp")
     assert blocked is True
@@ -26,15 +26,6 @@ def test_intercept_and_sanitize_command_daemons_and_schematics():
     blocked, _, err = intercept_and_sanitize_command("npx mcp-server-git")
     assert blocked is True
     assert "strictly disabled" in err
-
-    # Legacy/Broken Tailwind Schematic Blocking
-    blocked, _, err = intercept_and_sanitize_command("ng add @ngneat/tailwind")
-    assert blocked is True
-    assert "Do NOT use 'ng add' for Tailwind CSS" in err
-
-    blocked, _, err = intercept_and_sanitize_command("npx ng add tailwindcss")
-    assert blocked is True
-    assert "Do NOT use 'ng add' for Tailwind CSS" in err
 
     # Web & Server Daemons
     blocked, _, err = intercept_and_sanitize_command("ng serve")
@@ -55,27 +46,19 @@ def test_intercept_and_sanitize_command_daemons_and_schematics():
     assert blocked is True
 
 
-def test_intercept_and_sanitize_command_test_flags_and_confirmations():
-    # Auto-injects --no-watch into Angular test
-    blocked, sanitized, _ = intercept_and_sanitize_command("ng test")
+def test_intercept_and_sanitize_command_passthrough_clean_commands():
+    # Single-run commands pass through without modification or auto-injected flags
+    blocked, sanitized, _ = intercept_and_sanitize_command("ng test --no-watch")
     assert blocked is False
-    assert "--no-watch" in sanitized
+    assert sanitized == "ng test --no-watch"
 
-    # Auto-injects -- --no-watch into pnpm/npm test
     blocked, sanitized, _ = intercept_and_sanitize_command("pnpm test")
     assert blocked is False
-    assert "-- --no-watch" in sanitized
+    assert sanitized == "pnpm test"
 
-    # Strips broken --watch=False flags and normalizes to --no-watch
-    blocked, sanitized, _ = intercept_and_sanitize_command("ng test --watch=False")
-    assert blocked is False
-    assert "--watch=False" not in sanitized
-    assert "--no-watch" in sanitized
-
-    # Auto-injects --skip-confirmation for ng generate/add
     blocked, sanitized, _ = intercept_and_sanitize_command("ng generate service auth")
     assert blocked is False
-    assert "--skip-confirmation" in sanitized
+    assert sanitized == "ng generate service auth"
 
 
 @pytest.mark.asyncio

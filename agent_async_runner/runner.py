@@ -8,13 +8,10 @@ from agent_core_utils import track_latency, audit_logger
 
 HIGHRISKCOMMANDS = {"rm", "rmdir", "chmod", "chown", "sudo", "dd", "mkfs"}
 
-# 1. Long-running interactive daemons & blocked protocols
+# Long-running interactive daemons & blocked protocols across platforms
 BLOCKED_DAEMONS = [
     # Blanket block on Model Context Protocol (MCP) servers
     r"\b(npx\s+|uvx\s+|python\s+-m\s+)?.*mcp.*\b",
-    
-    # Broken/Incompatible or legacy Tailwind schematics
-    r"\b(ng\s+add|npx\s+ng\s+add)\s+.*(@ngneat/tailwind|tailwindcss)\b",
     
     # Android / Gradle / Kotlin daemons
     r"\b(gradlew?|./gradlew)\s+.*(run|app:run|connectedCheck)\b",
@@ -34,36 +31,18 @@ BLOCKED_DAEMONS = [
     r"\b(vite|npx\s+vite)\b",
 ]
 
-# 2. Non-blocking test runner rules & non-interactive flag injection
-TEST_SANITY_RULES = [
-    # Angular tests (use --no-watch instead of broken --watch=False)
-    (r"\b(ng|npx\s+ng)\s+test\b", "--no-watch"),
-
-    # Generic pnpm/npm/yarn test runners
-    (r"\b(pnpm|npm|yarn|bun)\s+(run\s+)?test\b", "-- --no-watch"),
-
-    # Android / Gradle tests
-    (r"\b(gradlew?|./gradlew)\s+test\b", "--info"),
-    
-    # iOS / Xcode tests
-    (r"\bxcodebuild\s+test\b", "-disable-concurrent-destination-testing"),
-    
-    # Flutter tests
-    (r"\bflutter\s+test\b", "--no-pub"),
-]
-
 # Background async tasks registry
 BACKGROUND_TASKS: Dict[str, Dict[str, Any]] = {}
 
 
 def intercept_and_sanitize_command(command: str) -> Tuple[bool, str, str]:
     """
-    Validates, blocks, and sanitizes shell commands before execution.
+    Validates and blocks interactive daemons and unauthorized protocols.
     Returns: (is_blocked, transformed_command, error_reason)
     """
     cmd_str = command.strip()
 
-    # Step 1: Check for long-running daemons or blocked schematics
+    # Step 1: Check for long-running daemons or blocked protocols
     for pattern in BLOCKED_DAEMONS:
         if re.search(pattern, cmd_str, re.IGNORECASE):
             match = re.search(pattern, cmd_str, re.IGNORECASE)
@@ -74,29 +53,11 @@ def intercept_and_sanitize_command(command: str) -> Tuple[bool, str, str]:
                     f"Model Context Protocol (MCP) commands ('{matched_text}') are strictly disabled. "
                     f"Use standard file tools or single-run CLI commands."
                 )
-            
-            if "@ngneat/tailwind" in matched_text or "tailwindcss" in matched_text:
-                return True, cmd_str, (
-                    "Do NOT use 'ng add' for Tailwind CSS. Tailwind v4 is already configured via PostCSS "
-                    "(.postcssrc.json) and src/styles.css."
-                )
 
             return True, cmd_str, (
                 f"Command '{matched_text}' launches an interactive daemon or long-running dev server. "
                 f"Interactive processes are forbidden during agent turns."
             )
-
-    # Step 2: Auto-inject --skip-confirmation for non-interactive ng commands
-    if re.search(r"\b(ng|npx\s+ng)\s+(add|generate|g)\b", cmd_str):
-        if "--skip-confirmation" not in cmd_str:
-            cmd_str = f"{cmd_str} --skip-confirmation"
-
-    # Step 3: Strip broken watch flags and auto-inject non-blocking flags
-    cmd_str = re.sub(r"--watch=(False|false)", "", cmd_str).strip()
-    
-    for pattern, required_flag in TEST_SANITY_RULES:
-        if re.search(pattern, cmd_str) and required_flag not in cmd_str:
-            cmd_str = f"{cmd_str} {required_flag}"
 
     return False, cmd_str, ""
 
