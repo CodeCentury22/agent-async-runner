@@ -107,8 +107,9 @@ async def test_execute_async_subprocess_hitl_denied(mock_hitl):
 # Tests for git_utils.py
 # =====================================================================
 
-@patch("agent_async_runner.git_utils.execute_async_subprocess")
-def test_get_git_status_changes_non_git_repo(mock_exec):
+@pytest.mark.asyncio
+@patch("agent_async_runner.git_utils.execute_async_subprocess", new_callable=AsyncMock)
+async def test_get_git_status_changes_non_git_repo(mock_exec):
     """Verify returns (False, empty, empty) when git returns non-zero status."""
     mock_exec.return_value = {
         "returncode": 128,
@@ -117,16 +118,17 @@ def test_get_git_status_changes_non_git_repo(mock_exec):
         "status": "ERROR"
     }
 
-    is_git, update_files, delete_files = get_git_status_changes("/fake/dir")
+    is_git, update_files, delete_files = await get_git_status_changes("/fake/dir")
 
     assert is_git is False
     assert update_files == set()
     assert delete_files == set()
 
 
+@pytest.mark.asyncio
 @patch("agent_async_runner.git_utils.os.path.isfile", return_value=True)
-@patch("agent_async_runner.git_utils.execute_async_subprocess")
-def test_get_git_status_changes_parses_updates_and_deletes(mock_exec, mock_isfile):
+@patch("agent_async_runner.git_utils.execute_async_subprocess", new_callable=AsyncMock)
+async def test_get_git_status_changes_parses_updates_and_deletes(mock_exec, mock_isfile):
     """Verify correctly categorizes updated, untracked, and deleted files from git status porcelain."""
     mock_exec.side_effect = [
         {"returncode": 0, "stdout": "true", "stderr": "", "status": "SUCCESS"},
@@ -138,7 +140,7 @@ def test_get_git_status_changes_parses_updates_and_deletes(mock_exec, mock_isfil
         }
     ]
 
-    is_git, update_files, delete_files = get_git_status_changes("/fake/dir")
+    is_git, update_files, delete_files = await get_git_status_changes("/fake/dir")
 
     assert is_git is True
     assert "src/app.ts" in update_files

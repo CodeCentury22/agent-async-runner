@@ -1,15 +1,17 @@
+# agent_async_runner/git_utils.py
+
 import os
 from typing import Tuple, Set
 from .runner import execute_async_subprocess
 
 
-def get_git_status_changes(workspace_dir: str) -> Tuple[bool, Set[str], Set[str]]:
+async def get_git_status_changes(workspace_dir: str) -> Tuple[bool, Set[str], Set[str]]:
     """
-    Queries git status in the target workspace.
+    Asynchronously queries git status in the target workspace.
     Returns: (is_git_repo, files_to_update, files_to_delete)
     """
     # 1. Check if workspace is inside a git work tree
-    check_res = execute_async_subprocess(
+    check_res = await execute_async_subprocess(
         "git rev-parse --is-inside-work-tree",
         timeout=5.0,
         bypass_hitl=True
@@ -18,7 +20,7 @@ def get_git_status_changes(workspace_dir: str) -> Tuple[bool, Set[str], Set[str]
         return False, set(), set()
 
     # 2. Get status porcelain listing
-    status_res = execute_async_subprocess(
+    status_res = await execute_async_subprocess(
         "git status --porcelain",
         timeout=10.0,
         bypass_hitl=True
