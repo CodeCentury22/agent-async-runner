@@ -1,9 +1,12 @@
 import pytest
+import asyncio
 from unittest.mock import patch, AsyncMock
 from agent_async_runner.runner import (
     is_high_risk,
     intercept_and_sanitize_command,
     execute_async_subprocess,
+    start_background_task,
+    get_background_task_status,
 )
 from agent_async_runner.git_utils import get_git_status_changes
 
@@ -14,19 +17,24 @@ def test_is_high_risk_detection():
     assert is_high_risk("ls -la") is False
 
 
-def test_intercept_and_sanitize_command_daemons():
+def test_intercept_and_sanitize_command_daemons_and_schematics():
     # Blanket MCP Blocking Assertions
     blocked, _, err = intercept_and_sanitize_command("ng mcp")
     assert blocked is True
-    assert "strictly disabled" in err or "Protocol server execution" in err
+    assert "strictly disabled" in err
 
     blocked, _, err = intercept_and_sanitize_command("npx mcp-server-git")
     assert blocked is True
-    assert "strictly disabled" in err or "Protocol server execution" in err
+    assert "strictly disabled" in err
 
-    blocked, _, err = intercept_and_sanitize_command("npx ng mcp --help")
+    # Legacy/Broken Tailwind Schematic Blocking
+    blocked, _, err = intercept_and_sanitize_command("ng add @ngneat/tailwind")
     assert blocked is True
-    assert "strictly disabled" in err or "Protocol server execution" in err
+    assert "Do NOT use 'ng add' for Tailwind CSS" in err
+
+    blocked, _, err = intercept_and_sanitize_command("npx ng add tailwindcss")
+    assert blocked is True
+    assert "Do NOT use 'ng add' for Tailwind CSS" in err
 
     # Web & Server Daemons
     blocked, _, err = intercept_and_sanitize_command("ng serve")
@@ -47,21 +55,27 @@ def test_intercept_and_sanitize_command_daemons():
     assert blocked is True
 
 
-def test_intercept_and_sanitize_command_test_flags():
-    # Auto-injects --watch=false into Angular test
+def test_intercept_and_sanitize_command_test_flags_and_confirmations():
+    # Auto-injects --no-watch into Angular test
     blocked, sanitized, _ = intercept_and_sanitize_command("ng test")
     assert blocked is False
-    assert "--watch=false" in sanitized
+    assert "--no-watch" in sanitized
 
-    # Auto-injects --watch=false into npm test
-    blocked, sanitized, _ = intercept_and_sanitize_command("npm test")
+    # Auto-injects -- --no-watch into pnpm/npm test
+    blocked, sanitized, _ = intercept_and_sanitize_command("pnpm test")
     assert blocked is False
-    assert "--watch=false" in sanitized
+    assert "-- --no-watch" in sanitized
 
-    # Retains existing non-blocking flags
-    blocked, sanitized, _ = intercept_and_sanitize_command("ng test --watch=false")
+    # Strips broken --watch=False flags and normalizes to --no-watch
+    blocked, sanitized, _ = intercept_and_sanitize_command("ng test --watch=False")
     assert blocked is False
-    assert sanitized == "ng test --watch=false"
+    assert "--watch=False" not in sanitized
+    assert "--no-watch" in sanitized
+
+    # Auto-injects --skip-confirmation for ng generate/add
+    blocked, sanitized, _ = intercept_and_sanitize_command("ng generate service auth")
+    assert blocked is False
+    assert "--skip-confirmation" in sanitized
 
 
 @pytest.mark.asyncio
@@ -77,7 +91,7 @@ async def test_execute_async_subprocess_mcp_blocked():
     result = await execute_async_subprocess("ng mcp")
     assert result["status"] == "BLOCKED"
     assert result["returncode"] == 1
-    assert "Protocol server execution" in result["stderr"] or "strictly disabled" in result["stderr"]
+    assert "strictly disabled" in result["stderr"]
 
 
 @pytest.mark.asyncio
@@ -101,6 +115,26 @@ async def test_execute_async_subprocess_hitl_denied(mock_hitl):
     assert result["status"] == "DENIED"
     assert result["returncode"] == -1
     mock_hitl.assert_called_once()
+
+
+# =====================================================================
+# Tests for Background Subprocess Execution
+# =====================================================================
+
+@pytest.mark.asyncio
+async def test_start_and_get_background_task():
+    # Start non-blocking background echo task
+    start_res = await start_background_task("echo 'Background Worker Finished'")
+    assert start_res["status"] == "STARTED"
+    task_id = start_res["task_id"]
+
+    # Wait briefly for background event loop processing
+    await asyncio.sleep(0.1)
+
+    status_res = await get_background_task_status(task_id)
+    assert status_res["status"] == "SUCCESS"
+    assert status_res["returncode"] == 0
+    assert "Background Worker Finished" in status_res["stdout"]
 
 
 # =====================================================================
