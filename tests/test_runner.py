@@ -17,15 +17,17 @@ def test_is_high_risk_detection():
     assert is_high_risk("ls -la") is False
 
 
-def test_intercept_and_sanitize_command_daemons():
-    # Blanket MCP Blocking Assertions
+@patch("agent_async_runner.runner.has_active_mcp_config", return_value=False)
+def test_intercept_and_sanitize_command_daemons(mock_mcp_config):
+    # MCP Commands when unconfigured
     blocked, _, err = intercept_and_sanitize_command("ng mcp")
     assert blocked is True
-    assert "strictly disabled" in err
+    assert "SYSTEM INTERCEPT" in err
+    assert "INSTRUCTIONS FOR AGENT" in err
 
     blocked, _, err = intercept_and_sanitize_command("npx mcp-server-git")
     assert blocked is True
-    assert "strictly disabled" in err
+    assert "SYSTEM INTERCEPT" in err
 
     # Web & Server Daemons
     blocked, _, err = intercept_and_sanitize_command("ng serve")
@@ -46,8 +48,17 @@ def test_intercept_and_sanitize_command_daemons():
     assert blocked is True
 
 
+@patch("agent_async_runner.runner.has_active_mcp_config", return_value=True)
+def test_intercept_and_sanitize_command_mcp_configured(mock_mcp_config):
+    """Verify MCP commands pass through when .agent/mcp.json defines active servers."""
+    blocked, sanitized, err = intercept_and_sanitize_command("npx mcp-server-git")
+    assert blocked is False
+    assert sanitized == "npx mcp-server-git"
+    assert err == ""
+
+
 def test_intercept_and_sanitize_command_passthrough_clean_commands():
-    # Single-run commands pass through without modification or auto-injected flags
+    # Single-run commands pass through without modification
     blocked, sanitized, _ = intercept_and_sanitize_command("ng test --no-watch")
     assert blocked is False
     assert sanitized == "ng test --no-watch"
@@ -70,11 +81,12 @@ async def test_execute_async_subprocess_blocked():
 
 
 @pytest.mark.asyncio
-async def test_execute_async_subprocess_mcp_blocked():
+@patch("agent_async_runner.runner.has_active_mcp_config", return_value=False)
+async def test_execute_async_subprocess_mcp_blocked(mock_mcp_config):
     result = await execute_async_subprocess("ng mcp")
     assert result["status"] == "BLOCKED"
     assert result["returncode"] == 1
-    assert "strictly disabled" in result["stderr"]
+    assert "SYSTEM INTERCEPT" in result["stderr"]
 
 
 @pytest.mark.asyncio
