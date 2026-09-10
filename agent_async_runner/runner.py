@@ -126,6 +126,19 @@ def request_human_approval(command: str) -> bool:
     return response == "y"
 
 
+def summarize_error_output(stderr: str, max_lines: int = 3) -> str:
+    """Filters and trims verbose stderr down to the core error lines."""
+    if not stderr:
+        return ""
+    lines = stderr.splitlines()
+    error_lines = [
+        line for line in lines
+        if any(keyword in line.lower() for keyword in ["error", "err!", "fail", "✘", "exception", "fatal"])
+    ]
+    target_lines = error_lines if error_lines else [l for l in lines if l.strip()]
+    return "\n".join(target_lines[:max_lines])
+
+
 @track_latency
 @audit_logger(log_file="async_telemetry.jsonl")
 async def execute_async_subprocess(
@@ -172,12 +185,15 @@ async def execute_async_subprocess(
         )
 
         stdout = stdout_bytes.decode("utf-8").strip()
-        stderr = stderr_bytes.decode("utf-8").strip()
+        raw_stderr = stderr_bytes.decode("utf-8").strip()
+
+        # Summarize stderr if execution failed to prevent context bloat
+        final_stderr = summarize_error_output(raw_stderr) if process.returncode != 0 else raw_stderr
 
         return {
             "command": sanitized_cmd,
             "stdout": stdout,
-            "stderr": stderr,
+            "stderr": final_stderr,
             "returncode": process.returncode,
             "status": "SUCCESS" if process.returncode == 0 else "ERROR"
         }
@@ -243,7 +259,7 @@ async def _monitor_background_task(task_id: str):
     stdout_bytes, stderr_bytes = await process.communicate()
 
     task_info["stdout"] = stdout_bytes.decode("utf-8").strip()
-    task_info["stderr"] = stderr_bytes.decode("utf-8").strip()
+    task_info["stderr"] = summarize_error_output(stderr_bytes.decode("utf-8").strip()) if process.returncode != 0 else stderr_bytes.decode("utf-8").strip()
     task_info["returncode"] = process.returncode
     task_info["status"] = "SUCCESS" if process.returncode == 0 else "ERROR"
 

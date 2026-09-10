@@ -9,6 +9,7 @@ from agent_async_runner.runner import (
     get_background_task_status,
 )
 from agent_async_runner.git_utils import get_git_status_changes
+from agent_async_runner.runner import summarize_error_output
 
 
 def test_is_high_risk_detection():
@@ -176,3 +177,14 @@ async def test_get_git_status_changes_parses_updates_and_deletes(mock_exec, mock
     assert "src/new_component.ts" in update_files
     assert "src/file with spaces.ts" in update_files
     assert "src/old_component.ts" in delete_files
+
+
+def test_summarize_error_output():
+    verbose_stderr = (
+        "npm warn deprecated source-map-resolve@0.6.0: See https://github.com\n"
+        "✘ [ERROR] NG8008: Required input 'formField' from component Input must be specified.\n"
+        "Some extra stack trace info here."
+    )
+    summarized = summarize_error_output(verbose_stderr, max_lines=1)
+    assert "NG8008" in summarized
+    assert len(summarized.splitlines()) == 1
