@@ -139,6 +139,15 @@ def summarize_error_output(stderr: str, max_lines: int = 3) -> str:
     return "\n".join(target_lines[:max_lines])
 
 
+def summarize_success_output(stdout: str) -> str:
+    """Trims verbose bundle generation logs down to a clean success confirmation."""
+    if not stdout:
+        return "Build completed successfully."
+    if "Application bundle generation complete" in stdout:
+        return "Application bundle generation complete. [SUCCESS]"
+    return stdout[:300] + "..." if len(stdout) > 300 else stdout
+
+
 @track_latency
 @audit_logger(log_file="async_telemetry.jsonl")
 async def execute_async_subprocess(
@@ -184,15 +193,15 @@ async def execute_async_subprocess(
             process.communicate(), timeout=timeout
         )
 
-        stdout = stdout_bytes.decode("utf-8").strip()
+        raw_stdout = stdout_bytes.decode("utf-8").strip()
         raw_stderr = stderr_bytes.decode("utf-8").strip()
 
-        # Summarize stderr if execution failed to prevent context bloat
+        final_stdout = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
         final_stderr = summarize_error_output(raw_stderr) if process.returncode != 0 else raw_stderr
 
         return {
             "command": sanitized_cmd,
-            "stdout": stdout,
+            "stdout": final_stdout,
             "stderr": final_stderr,
             "returncode": process.returncode,
             "status": "SUCCESS" if process.returncode == 0 else "ERROR"
@@ -258,8 +267,11 @@ async def _monitor_background_task(task_id: str):
 
     stdout_bytes, stderr_bytes = await process.communicate()
 
-    task_info["stdout"] = stdout_bytes.decode("utf-8").strip()
-    task_info["stderr"] = summarize_error_output(stderr_bytes.decode("utf-8").strip()) if process.returncode != 0 else stderr_bytes.decode("utf-8").strip()
+    raw_stdout = stdout_bytes.decode("utf-8").strip()
+    raw_stderr = stderr_bytes.decode("utf-8").strip()
+
+    task_info["stdout"] = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
+    task_info["stderr"] = summarize_error_output(raw_stderr) if process.returncode != 0 else raw_stderr
     task_info["returncode"] = process.returncode
     task_info["status"] = "SUCCESS" if process.returncode == 0 else "ERROR"
 

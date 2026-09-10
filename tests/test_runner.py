@@ -9,7 +9,7 @@ from agent_async_runner.runner import (
     get_background_task_status,
 )
 from agent_async_runner.git_utils import get_git_status_changes
-from agent_async_runner.runner import summarize_error_output
+from agent_async_runner.runner import summarize_error_output, summarize_success_output
 
 
 def test_is_high_risk_detection():
@@ -188,3 +188,13 @@ def test_summarize_error_output():
     summarized = summarize_error_output(verbose_stderr, max_lines=1)
     assert "NG8008" in summarized
     assert len(summarized.splitlines()) == 1
+
+
+def test_summarize_success_output():
+    verbose_stdout = (
+        "Initial chunk files | Names\n"
+        "Application bundle generation complete. [2.788 seconds]\n"
+        "Output location: /dist"
+    )
+    summarized = summarize_success_output(verbose_stdout)
+    assert "Application bundle generation complete. [SUCCESS]" in summarized
