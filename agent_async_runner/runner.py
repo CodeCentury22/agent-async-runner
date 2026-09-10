@@ -148,6 +148,36 @@ def summarize_success_output(stdout: str) -> str:
     return stdout[:300] + "..." if len(stdout) > 300 else stdout
 
 
+def extract_error_files(stderr: str) -> List[str]:
+    """Extracts file paths mentioned in compilation errors."""
+    pattern = r"([a-zA-Z0-9_\-/]+\.(?:html|ts|css|json))(?::\d+:\d+)?"
+    matches = re.findall(pattern, stderr)
+    return list(dict.fromkeys(matches))
+
+
+def enrich_build_error(command: str, stderr: str) -> str:
+    """Enriches build/test failure stderr with actionable file reading instructions."""
+    build_keywords = ["build", "test", "compile", "ng", "vite", "webpack", "tsc"]
+    is_build_cmd = any(kw in command.lower() for kw in build_keywords)
+    
+    if not is_build_cmd:
+        return stderr
+
+    files = extract_error_files(stderr)
+    if files:
+        file_list_str = ", ".join([f"`{f}`" for f in files])
+        guidance = (
+            f"\n\n🛑 [BUILD/TEST ERROR INTERCEPT & GUIDANCE]:\n"
+            f"The build/test command failed due to compilation errors in: {file_list_str}.\n"
+            f"INSTRUCTIONS FOR AGENT:\n"
+            f"1. DO NOT repeat the build command immediately.\n"
+            f"2. You MUST invoke `read_file` on the affected files ({file_list_str}) to inspect their current code before attempting any fix.\n"
+            f"3. After inspecting, use `write_file` to correct the syntax or attributes, then run the build again."
+        )
+        return stderr + guidance
+    return stderr
+
+
 @track_latency
 @audit_logger(log_file="async_telemetry.jsonl")
 async def execute_async_subprocess(
@@ -197,7 +227,12 @@ async def execute_async_subprocess(
         raw_stderr = stderr_bytes.decode("utf-8").strip()
 
         final_stdout = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
-        final_stderr = summarize_error_output(raw_stderr) if process.returncode != 0 else raw_stderr
+        
+        if process.returncode != 0:
+            summarized_err = summarize_error_output(raw_stderr)
+            final_stderr = enrich_build_error(sanitized_cmd, summarized_err)
+        else:
+            final_stderr = raw_stderr
 
         return {
             "command": sanitized_cmd,
@@ -264,6 +299,7 @@ async def _monitor_background_task(task_id: str):
     """Monitors background task execution and stores output buffers."""
     task_info = BACKGROUND_TASKS[task_id]
     process = task_info["process"]
+    cmd = task_info["command"]
 
     stdout_bytes, stderr_bytes = await process.communicate()
 
@@ -271,7 +307,13 @@ async def _monitor_background_task(task_id: str):
     raw_stderr = stderr_bytes.decode("utf-8").strip()
 
     task_info["stdout"] = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
-    task_info["stderr"] = summarize_error_output(raw_stderr) if process.returncode != 0 else raw_stderr
+    
+    if process.returncode != 0:
+        summarized_err = summarize_error_output(raw_stderr)
+        task_info["stderr"] = enrich_build_error(cmd, summarized_err)
+    else:
+        task_info["stderr"] = raw_stderr
+
     task_info["returncode"] = process.returncode
     task_info["status"] = "SUCCESS" if process.returncode == 0 else "ERROR"
 
@@ -338,7 +380,7 @@ SHELL_TOOLS_SCHEMA: List[Dict[str, Any]] = [
     },
     {
         "type": "function",
-        "function": {
+        "get_background_task_status": {
             "name": "get_background_task_status",
             "description": "Checks the status, stdout, and stderr of a background task using its task_id.",
             "parameters": {
