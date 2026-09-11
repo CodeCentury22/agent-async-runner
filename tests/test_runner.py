@@ -9,7 +9,12 @@ from agent_async_runner.runner import (
     get_background_task_status,
 )
 from agent_async_runner.git_utils import get_git_status_changes
-from agent_async_runner.runner import summarize_error_output, summarize_success_output
+from agent_async_runner.runner import (
+    filter_errors_only,
+    extract_error_files,
+    enrich_build_error,
+    summarize_success_output
+)
 
 
 def test_is_high_risk_detection():
@@ -179,15 +184,36 @@ async def test_get_git_status_changes_parses_updates_and_deletes(mock_exec, mock
     assert "src/old_component.ts" in delete_files
 
 
-def test_summarize_error_output():
+# =====================================================================
+# Tests for Error Filtering & Enrichment
+# =====================================================================
+
+def test_filter_errors_only():
     verbose_stderr = (
-        "npm warn deprecated source-map-resolve@0.6.0: See https://github.com\n"
+        "▲ [WARNING] Exceeds maximum budget\n"
+        "▲ [WARNING] NG02956: Not implemented\n"
         "✘ [ERROR] NG8008: Required input 'formField' from component Input must be specified.\n"
         "Some extra stack trace info here."
     )
-    summarized = summarize_error_output(verbose_stderr, max_lines=1)
-    assert "NG8008" in summarized
-    assert len(summarized.splitlines()) == 1
+    summarized = filter_errors_only(verbose_stderr)
+    assert "✘ [ERROR] NG8008" in summarized
+    assert "WARNING" not in summarized
+    assert "NG02956" not in summarized
+
+
+def test_extract_error_files_implicit_component():
+    stderr_with_component = "✘ [ERROR] NG8008: Required input 'formField' from component Input must be specified. \n  Error occurs in the template of component LoginPage."
+    files = extract_error_files(stderr_with_component)
+    assert "login-page.html / login-page.ts" in files
+
+
+def test_enrich_build_error_with_files():
+    stderr_with_path = "✘ [ERROR] NG8002: Can't bind to 'formControlName'. \n  src/app/auth/login.html:42:5"
+    enriched = enrich_build_error("ng build", stderr_with_path)
+    
+    assert "🛑 [BUILD/TEST ERROR INTERCEPT]" in enriched
+    assert "`src/app/auth/login.html`" in enriched
+    assert "You MUST invoke `read_file` on `src/app/auth/login.html`" in enriched
 
 
 def test_summarize_success_output():

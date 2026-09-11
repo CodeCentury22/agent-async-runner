@@ -148,34 +148,79 @@ def summarize_success_output(stdout: str) -> str:
     return stdout[:300] + "..." if len(stdout) > 300 else stdout
 
 
+def filter_errors_only(stderr: str) -> str:
+    """Strips warnings and keeps strictly explicit compilation/test error lines."""
+    if not stderr:
+        return ""
+    lines = stderr.splitlines()
+    error_keywords = ["error", "err!", "fail", "✘", "exception", "fatal"]
+    warning_keywords = ["warning", "warn", "▲", "ng02956", "not implemented"]
+    
+    filtered = []
+    for line in lines:
+        lower_line = line.lower()
+        if any(kw in lower_line for kw in error_keywords) and not any(wkw in lower_line for wkw in warning_keywords):
+            filtered.append(line.strip())
+            
+    # If no explicit error keyword match, return non-warning lines
+    if not filtered:
+        filtered = [l.strip() for l in lines if l.strip() and not any(wkw in l.lower() for wkw in warning_keywords)]
+        
+    return "\n".join(filtered[:5])
+
+
 def extract_error_files(stderr: str) -> List[str]:
     """Extracts file paths mentioned in compilation errors."""
-    pattern = r"([a-zA-Z0-9_\-/]+\.(?:html|ts|css|json))(?::\d+:\d+)?"
+    # 1. Match explicit file paths across the raw stderr 
+    # (Paths often appear on lines directly below the 'error' keyword)
+    pattern = r"([a-zA-Z0-9_\-/]+\.(?:html|ts|css|scss|json|js|jsx|tsx))(?::\d+:\d+)?"
     matches = re.findall(pattern, stderr)
+    
+    # 2. Fallback: Extract Angular component names if file path extension is omitted
+    if not matches:
+        error_text = filter_errors_only(stderr)
+        comp_matches = re.findall(r"component\s+([A-Z][a-zA-Z0-9]+)", error_text)
+        for comp in comp_matches:
+            # Convert CamelCase component name (LoginPage) to typical Angular file prefix (login-page)
+            kebab = re.sub(r"(?<!^)(?=[A-Z])", "-", comp).lower()
+            matches.append(f"{kebab}.html / {kebab}.ts")
+
     return list(dict.fromkeys(matches))
 
 
 def enrich_build_error(command: str, stderr: str) -> str:
-    """Enriches build/test failure stderr with actionable file reading instructions."""
+    """Enriches build/test failure stderr strictly with core errors and target files, filtering out all warnings."""
     build_keywords = ["build", "test", "compile", "ng", "vite", "webpack", "tsc"]
     is_build_cmd = any(kw in command.lower() for kw in build_keywords)
     
     if not is_build_cmd:
-        return stderr
+        # Fall back to standard summarization for non-build shell commands
+        return summarize_error_output(stderr)
 
+    clean_errors = filter_errors_only(stderr)
     files = extract_error_files(stderr)
+    
     if files:
         file_list_str = ", ".join([f"`{f}`" for f in files])
         guidance = (
-            f"\n\n🛑 [BUILD/TEST ERROR INTERCEPT & GUIDANCE]:\n"
-            f"The build/test command failed due to compilation errors in: {file_list_str}.\n"
+            f"🛑 [BUILD/TEST ERROR INTERCEPT]:\n"
+            f"Errors:\n{clean_errors}\n\n"
+            f"Affected File(s): {file_list_str}\n\n"
             f"INSTRUCTIONS FOR AGENT:\n"
-            f"1. DO NOT repeat the build command immediately.\n"
-            f"2. You MUST invoke `read_file` on the affected files ({file_list_str}) to inspect their current code before attempting any fix.\n"
-            f"3. After inspecting, use `write_file` to correct the syntax or attributes, then run the build again."
+            f"1. You MUST invoke `read_file` on {file_list_str} to inspect the existing code before writing changes.\n"
+            f"2. DO NOT repeat the build command or blindly call `write_file` without inspecting first.\n"
+            f"3. Apply the fix using `write_file` after inspecting."
         )
-        return stderr + guidance
-    return stderr
+    else:
+        guidance = (
+            f"🛑 [BUILD/TEST ERROR INTERCEPT]:\n"
+            f"Errors:\n{clean_errors}\n\n"
+            f"INSTRUCTIONS FOR AGENT:\n"
+            f"1. You MUST invoke `read_file` on the target component or template files mentioned above.\n"
+            f"2. Inspect the file content, apply the fix using `write_file`, then re-run the build."
+        )
+        
+    return guidance
 
 
 @track_latency
@@ -228,9 +273,9 @@ async def execute_async_subprocess(
 
         final_stdout = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
         
+        # Pass raw_stderr directly so parsing doesn't break
         if process.returncode != 0:
-            summarized_err = summarize_error_output(raw_stderr)
-            final_stderr = enrich_build_error(sanitized_cmd, summarized_err)
+            final_stderr = enrich_build_error(sanitized_cmd, raw_stderr)
         else:
             final_stderr = raw_stderr
 
@@ -308,9 +353,9 @@ async def _monitor_background_task(task_id: str):
 
     task_info["stdout"] = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
     
+    # Pass raw_stderr directly so parsing doesn't break
     if process.returncode != 0:
-        summarized_err = summarize_error_output(raw_stderr)
-        task_info["stderr"] = enrich_build_error(cmd, summarized_err)
+        task_info["stderr"] = enrich_build_error(cmd, raw_stderr)
     else:
         task_info["stderr"] = raw_stderr
 
