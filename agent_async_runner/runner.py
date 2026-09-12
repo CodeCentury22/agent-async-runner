@@ -223,6 +223,20 @@ def enrich_build_error(command: str, stderr: str) -> str:
     return guidance
 
 
+def clean_success_stderr(stderr: str) -> str:
+    """Strips out non-fatal warnings, budget notices, and info logs when a build succeeds."""
+    if not stderr:
+        return ""
+    lines = stderr.splitlines()
+    warning_keywords = ["warning", "warn", "▲", "ng02956", "exceeded maximum budget", "not implemented"]
+    
+    filtered = [
+        line.strip() for line in lines 
+        if line.strip() and not any(kw in line.lower() for kw in warning_keywords)
+    ]
+    return "\n".join(filtered)
+
+
 @track_latency
 @audit_logger(log_file="async_telemetry.jsonl")
 async def execute_async_subprocess(
@@ -277,7 +291,7 @@ async def execute_async_subprocess(
         if process.returncode != 0:
             final_stderr = enrich_build_error(sanitized_cmd, raw_stderr)
         else:
-            final_stderr = raw_stderr
+            final_stderr = clean_success_stderr(raw_stderr)
 
         return {
             "command": sanitized_cmd,
@@ -354,10 +368,12 @@ async def _monitor_background_task(task_id: str):
     task_info["stdout"] = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
     
     # Pass raw_stderr directly so parsing doesn't break
+    task_info["stdout"] = summarize_success_output(raw_stdout) if process.returncode == 0 else raw_stdout
+    
     if process.returncode != 0:
         task_info["stderr"] = enrich_build_error(cmd, raw_stderr)
     else:
-        task_info["stderr"] = raw_stderr
+        task_info["stderr"] = clean_success_stderr(raw_stderr)
 
     task_info["returncode"] = process.returncode
     task_info["status"] = "SUCCESS" if process.returncode == 0 else "ERROR"

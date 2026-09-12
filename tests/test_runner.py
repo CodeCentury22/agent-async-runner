@@ -7,6 +7,7 @@ from agent_async_runner.runner import (
     execute_async_subprocess,
     start_background_task,
     get_background_task_status,
+    clean_success_stderr
 )
 from agent_async_runner.git_utils import get_git_status_changes
 from agent_async_runner.runner import (
@@ -224,3 +225,14 @@ def test_summarize_success_output():
     )
     summarized = summarize_success_output(verbose_stdout)
     assert "Application bundle generation complete. [SUCCESS]" in summarized
+
+def test_clean_success_stderr():
+    verbose_success_stderr = (
+        "▲ [WARNING] Exceeds maximum budget\n"
+        "▲ [WARNING] NG02956: Not implemented\n"
+        "Some benign info message\n"
+    )
+    cleaned = clean_success_stderr(verbose_success_stderr)
+    assert "Exceeds maximum budget" not in cleaned
+    assert "NG02956" not in cleaned
+    assert "Some benign info message" in cleaned
